@@ -56,7 +56,7 @@ RUN mkdir -p /etc/cargo && \
 # (duplicated into the user's $HOME below after we switch users)
 
 # Prefer SSH for GitHub even if a dep uses https
-RUN git config --system url."ssh://git@github.com/".insteadOf https://github.com/
+# RUN git config --system url."ssh://git@github.com/".insteadOf https://github.com/
 
 # Add both common cargo bin paths to PATH (works for root or $USERNAME)
 ENV PATH=/home/${USERNAME}/.cargo/bin:/root/.cargo/bin:$PATH \
