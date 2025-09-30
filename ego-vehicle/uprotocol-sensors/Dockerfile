@@ -83,14 +83,20 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 
 FROM DEV as COMPILE
 
-COPY . $WORKDIR
-RUN --mount=type=ssh,mode=0666 \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    cargo fetch
+# Copy only Cargo files first to cache dependencies
+COPY Cargo.toml Cargo.lock ./
 
-RUN --mount=type=cache,target=${WORKDIR}/target/release \
-    cargo build --release
+# Create a dummy main.rs to satisfy cargo fetch
+RUN mkdir -p src && echo "fn main() {}" > src/main.rs
+
+# Fetch dependencies (this layer will be cached)
+RUN cargo fetch
+
+# Remove the dummy file and copy the real source code
+RUN rm -rf src/
+COPY . ./
+
+RUN cargo build --release
 
 FROM COMPILE as PROD
 ENV RUST_LOG=info

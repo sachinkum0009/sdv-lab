@@ -216,7 +216,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a uProtocol URI provider for this vehicle
     // This defines the identity of this node in the uProtocol network
-    let uri_provider = StaticUriProvider::new("EGOVehicle", 0, 2);
+    let uri_provider = StaticUriProvider::new("egovehicle", 0, 2);
 
     // Create the uProtocol transport using Zenoh as the underlying transport
     let transport: Arc<dyn UTransport> = Arc::new(
@@ -234,7 +234,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Register the actuation command listener with uProtocol
     // This listener will be called when messages matching the filter are received
-    let actuation_filter = UUri::from_str("//CruiseControl/0/2/8001")?;
+    let actuation_filter = UUri::from_str("//cruisecontrol/0/2/8001")?;
     log::info!(
         "Registering actuation command listener [filter: {}]",
         actuation_filter.to_uri(false)
@@ -251,7 +251,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Register the engage listener with uProtocol
     // This listener will be called when messages matching the filter are received
-    let engage_filter = UUri::from_str("//AAOS/0/2/8002")?;
+    let engage_filter = UUri::from_str("//aaos/0/2/8002")?;
     log::info!(
         "Registering engage listener [filter: {}]",
         engage_filter.to_uri(false)

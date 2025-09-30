@@ -1,0 +1,8 @@
+[env]
+LLVM_CONFIG_PATH = "/usr/bin/llvm-config-12"
+LIBCLANG_PATH = "/usr/lib/llvm-12/lib"
+LIBCLANG_STATIC_PATH = "/usr/lib/llvm-12/lib"
+CLANG_PATH = "/usr/bin/clang-12"
+
+[build]
+rustflags = ["-C", "linker=clang-12"]
