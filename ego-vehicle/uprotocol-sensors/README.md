@@ -103,7 +103,7 @@ You should see a pygame window open showing the ego vehicle.
 
 ```shell
 # start the the ego-vehicle proxy to collect sensors
-cargo run --release -- --ego_vehicle_sensor_lane_invasion_role lane_invasion_1 --ego_vehicle_sensor_image_role front_camera
+cargo run --release -- --ego-vehicle-sensor-lane-invasion-role lane_invasion_1 --ego-vehicle-sensor-image-role front_camera
 ```
 
 You should see the sensors configured be found and begin to publish in the terminal.

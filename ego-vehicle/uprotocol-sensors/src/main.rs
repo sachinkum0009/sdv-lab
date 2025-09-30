@@ -77,11 +77,20 @@ pub(crate) fn get_zenoh_config() -> zenoh_config::Config {
 
     let zenoh_string = if let Some(router) = &args.router {
         format!(
-            "{{ mode: 'peer', connect: {{ endpoints: [ 'tcp/{}:7447' ] }} }}",
+            "{{ mode: 'client', connect: {{ endpoints: [ 'tcp/{}:7447' ] }} }}",
             router
         )
     } else {
-        "{ mode: 'peer' }".to_string()
+        // Use peer mode but disable multicast scouting to prevent connection errors
+        // This allows the node to operate standalone without trying to discover other peers
+        r#"{
+            mode: 'peer',
+            scouting: {
+                multicast: {
+                    enabled: true
+                }
+            }
+        }"#.to_string()
     };
 
     let zenoh_config = Config::from_json5(&zenoh_string).expect("Failed to load Zenoh config");
