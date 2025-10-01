@@ -95,6 +95,7 @@ import re
 import weakref
 import zenoh
 import json
+import base64
 
 try:
     import pygame
@@ -408,6 +409,7 @@ class KeyboardControl(object):
         self._throttle_publisher = self._session.declare_publisher("vehicle/status/throttle_status")
         self._steering_publisher = self._session.declare_publisher("vehicle/status/steering_status")
         self._braking_publisher  = self._session.declare_publisher("vehicle/status/braking_status")
+        self._image_publisher = self._session.declare_publisher("vehicle/camera/image")
 
     def _engage_listener(self, sample):
         """
@@ -431,6 +433,44 @@ class KeyboardControl(object):
     def _publish_braking(self, brake: float):
         self._braking_publisher.put(f"{brake}")
 
+    def _publish_image(self, image_data: bytes, image_format: str = "rgb", timestamp: int = 0, width: int = 640, height: int = 480):
+        """
+        Publish camera image data via Zenoh.
+        
+        Args:
+            image_data: Raw image bytes
+            image_format: Format of the image (rgb, depth, semantic, etc.)
+            timestamp: Image timestamp
+            width: Image width in pixels
+            height: Image height in pixels
+        """
+        try:
+            # Create image metadata
+            image_info = {
+                "format": image_format,
+                "timestamp": timestamp,
+                "encoding": "base64",
+                "width": width,
+                "height": height,
+                "channels": 3 if image_format == "rgb" else 1
+            }
+            
+            # Encode image as base64
+            encoded_image = base64.b64encode(image_data).decode('utf-8')
+            
+            # Create message payload
+            message = {
+                "metadata": image_info,
+                "data": encoded_image
+            }
+            
+            # Publish the message
+            self._image_publisher.put(json.dumps(message))
+            if timestamp % 60 == 0:  # Print every 60 frames
+                print(f"Published {image_format} image {width}x{height} (frame {timestamp})")
+        except Exception as e:
+            print(f"[ERROR] Image publishing failed: {e}")
+
     def parse_events(self, client, world, clock, sync_mode):
         if isinstance(self._control, carla.VehicleControl):
             current_lights = self._lights
@@ -439,6 +479,7 @@ class KeyboardControl(object):
                 self._throttle_publisher.undeclare()
                 self._steering_publisher.undeclare()
                 self._braking_publisher.undeclare()
+                self._image_publisher.undeclare()
                 self._session.close()
                 return True
             elif event.type == pygame.KEYUP:
@@ -1130,12 +1171,13 @@ class RadarSensor(object):
 
 
 class CameraManager(object):
-    def __init__(self, parent_actor, hud, gamma_correction):
+    def __init__(self, parent_actor, hud, gamma_correction, controller=None):
         self.sensor = None
         self.surface = None
         self._parent = parent_actor
         self.hud = hud
         self.recording = False
+        self.controller = controller
         bound_x = 0.5 + self._parent.bounding_box.extent.x
         bound_y = 0.5 + self._parent.bounding_box.extent.y
         bound_z = 0.5 + self._parent.bounding_box.extent.z
@@ -1143,10 +1185,15 @@ class CameraManager(object):
 
         if not self._parent.type_id.startswith("walker.pedestrian"):
             self._camera_transforms = [
+                # First-person dashboard camera view (for image publishing)
+                (carla.Transform(carla.Location(x=+1.6*bound_x, y=+0.0*bound_y, z=1.7*bound_z)), Attachment.Rigid),
+                # Third-person view behind vehicle (for display)
                 (carla.Transform(carla.Location(x=-2.0*bound_x, y=+0.0*bound_y, z=2.0*bound_z), carla.Rotation(pitch=8.0)), Attachment.SpringArmGhost),
-                (carla.Transform(carla.Location(x=+0.8*bound_x, y=+0.0*bound_y, z=1.3*bound_z)), Attachment.Rigid),
+                # Side view
                 (carla.Transform(carla.Location(x=+1.9*bound_x, y=+1.0*bound_y, z=1.2*bound_z)), Attachment.SpringArmGhost),
+                # High rear view
                 (carla.Transform(carla.Location(x=-2.8*bound_x, y=+0.0*bound_y, z=4.6*bound_z), carla.Rotation(pitch=6.0)), Attachment.SpringArmGhost),
+                # Interior view
                 (carla.Transform(carla.Location(x=-1.0, y=-1.0*bound_y, z=0.4*bound_z)), Attachment.Rigid)]
         else:
             self._camera_transforms = [
@@ -1156,7 +1203,7 @@ class CameraManager(object):
                 (carla.Transform(carla.Location(x=-4.0, z=2.0), carla.Rotation(pitch=6.0)), Attachment.SpringArmGhost),
                 (carla.Transform(carla.Location(x=0, y=-2.5, z=-0.0), carla.Rotation(yaw=90.0)), Attachment.Rigid)]
 
-        self.transform_index = 1
+        self.transform_index = 0  # Use first-person dashboard view by default
         self.sensors = [
             ['sensor.camera.rgb', cc.Raw, 'Camera RGB', {}],
             ['sensor.camera.depth', cc.Raw, 'Camera Depth (Raw)', {}],
@@ -1197,6 +1244,10 @@ class CameraManager(object):
 
             item.append(bp)
         self.index = None
+
+    def set_controller(self, controller):
+        """Set the controller reference for image publishing."""
+        self.controller = controller
 
     def toggle_camera(self):
         self.transform_index = (self.transform_index + 1) % len(self._camera_transforms)
@@ -1256,7 +1307,7 @@ class CameraManager(object):
             # Example of converting the raw_data from a carla.DVSEventArray
             # sensor into a NumPy array and using it as an image
             dvs_events = np.frombuffer(image.raw_data, dtype=np.dtype([
-                ('x', np.uint16), ('y', np.uint16), ('t', np.int64), ('pol', np.bool)]))
+                ('x', np.uint16), ('y', np.uint16), ('t', np.int64), ('pol', bool)]))
             dvs_img = np.zeros((image.height, image.width, 3), dtype=np.uint8)
             # Blue is positive, red is negative
             dvs_img[dvs_events[:]['y'], dvs_events[:]['x'], dvs_events[:]['pol'] * 2] = 255
@@ -1275,6 +1326,41 @@ class CameraManager(object):
             array = array[:, :, :3]
             array = array[:, :, ::-1]
             self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
+            
+            # Publish image via Zenoh if controller is available and it's a camera sensor
+            if (self.controller and 
+                hasattr(self.controller, '_publish_image') and 
+                self.sensors[self.index][0].startswith('sensor.camera')):
+                try:
+                    # Get the sensor type for metadata
+                    sensor_type = self.sensors[self.index][2]  # Sensor description
+                    camera_transform = self._camera_transforms[self.transform_index][0]
+                    
+                    # Add debug info about camera position
+                    if image.frame % 60 == 0:  # Print every 60 frames (~ once per second)
+                        print(f"[DEBUG] Publishing from camera at transform index {self.transform_index}")
+                        print(f"[DEBUG] Camera position: x={camera_transform.location.x:.2f}, "
+                              f"y={camera_transform.location.y:.2f}, z={camera_transform.location.z:.2f}")
+                    
+                    # Always use raw image data for publishing to avoid display transformations
+                    if self.sensors[self.index][0] == 'sensor.camera.rgb':
+                        # CARLA RGB camera actually outputs BGRA format (4 channels)
+                        # Convert from BGRA to RGB for publishing
+                        bgra_array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+                        bgra_array = np.reshape(bgra_array, (image.height, image.width, 4))
+                        
+                        # Convert BGRA to RGB (remove alpha and swap blue/red channels)
+                        rgb_array = bgra_array[:, :, [2, 1, 0]]  # BGR to RGB, drop alpha
+                        rgb_bytes = rgb_array.tobytes()
+                        
+                        self.controller._publish_image(rgb_bytes, "rgb", image.frame, image.width, image.height)
+                    # else:
+                    #     # For other sensor types, use raw data
+                    #     self.controller._publish_image(image.raw_data, sensor_type.lower().replace(' ', '_'), image.frame, image.width, image.height)
+                        
+                except Exception as e:
+                    print(f"[DEBUG] Image publishing error: {e}")
+                    
         if self.recording:
             image.save_to_disk('_out/%08d' % image.frame)
 
@@ -1319,6 +1405,10 @@ def game_loop(args):
         hud = HUD(args.width, args.height)
         world = World(sim_world, hud, args)
         controller = KeyboardControl(world, args.autopilot, args.router)
+        
+        # Set controller reference in camera manager for image publishing
+        if world.camera_manager:
+            world.camera_manager.set_controller(controller)
 
         if args.sync:
             sim_world.tick()
